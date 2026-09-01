@@ -115,6 +115,7 @@ class Prescription(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id"), index=True)
     doctor_id: Mapped[str] = mapped_column(ForeignKey("doctors.id"), index=True)
+    disease: Mapped[str] = mapped_column(Text, default="")
     doctor_notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -129,10 +130,15 @@ class Medicine(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     prescription_id: Mapped[str] = mapped_column(ForeignKey("prescriptions.id"), index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    disease: Mapped[str] = mapped_column(String(255), default="")
     dosage: Mapped[str] = mapped_column(String(100), default="")
     duration_days: Mapped[int] = mapped_column(Integer, default=7)
     timing: Mapped[str] = mapped_column(String(100), default="morning")
+    frequency_pattern: Mapped[str] = mapped_column(String(30), default="daily")
+    times_per_day: Mapped[int] = mapped_column(Integer, default=1)
+    dose_times: Mapped[str] = mapped_column(Text, default="")
     start_date: Mapped[str] = mapped_column(String(20), default="")
+    start_time: Mapped[str] = mapped_column(String(10), default="")
 
     prescription: Mapped["Prescription"] = relationship(back_populates="medicines")
 

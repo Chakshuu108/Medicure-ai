@@ -2,15 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.security import require_roles
 from app.database import get_db
-from app.models import Patient
+from app.models import Medicine, Prescription
+from app.schemas.api import MedicineScheduleUpdate
 from app.services.scheduling_service import (
+    compute_dose_times,
     exchange_google_code,
     get_google_auth_url,
     get_patient_google_access_token,
     get_schedule_preview,
+    medicine_to_dict,
     refresh_google_token,
     sync_to_google_calendar,
 )
@@ -67,6 +71,32 @@ async def schedule_preview(
 ):
     items = await get_schedule_preview(db, current["user_id"])
     return {"schedule": items}
+
+
+@router.patch("/patient/medicines/{medicine_id}/schedule")
+async def update_medicine_schedule(
+    medicine_id: str,
+    data: MedicineScheduleUpdate,
+    current: dict = Depends(require_roles("patient")),
+    db: AsyncSession = Depends(get_db),
+):
+    import json
+
+    result = await db.execute(
+        select(Medicine)
+        .join(Prescription, Medicine.prescription_id == Prescription.id)
+        .where(Medicine.id == medicine_id, Prescription.patient_id == current["user_id"])
+    )
+    medicine = result.scalar_one_or_none()
+    if not medicine:
+        raise HTTPException(404, "Medicine not found")
+
+    dose_times = data.dose_times or compute_dose_times(data.start_time, int(medicine.times_per_day or 1))
+    medicine.start_date = data.start_date[:10]
+    medicine.start_time = data.start_time[:5]
+    medicine.dose_times = json.dumps(dose_times)
+    await db.flush()
+    return {"medicine": medicine_to_dict(medicine)}
 
 
 @router.post("/patient/schedule/sync-calendar")

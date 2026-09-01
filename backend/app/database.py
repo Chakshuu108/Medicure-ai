@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -25,6 +26,21 @@ AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_co
 
 class Base(DeclarativeBase):
     pass
+
+
+async def apply_schema_patches(conn) -> None:
+    """Add columns on existing Postgres tables (create_all does not alter tables)."""
+    patches = [
+        "ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS disease TEXT DEFAULT ''",
+        "ALTER TABLE medicines ADD COLUMN IF NOT EXISTS disease VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE medicines ADD COLUMN IF NOT EXISTS frequency_pattern VARCHAR(30) DEFAULT 'daily'",
+        "ALTER TABLE medicines ADD COLUMN IF NOT EXISTS times_per_day INTEGER DEFAULT 1",
+        "ALTER TABLE medicines ADD COLUMN IF NOT EXISTS dose_times TEXT DEFAULT ''",
+        "ALTER TABLE medicines ADD COLUMN IF NOT EXISTS start_time VARCHAR(10) DEFAULT ''",
+        "ALTER TABLE medicines ADD COLUMN IF NOT EXISTS start_date VARCHAR(20) DEFAULT ''",
+    ]
+    for stmt in patches:
+        await conn.execute(text(stmt))
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -50,7 +50,7 @@ from app.services.meet_service import (
     slot_room_name,
 )
 from app.services.opd_booking_service import ensure_patient_can_book
-from app.services.scheduling_service import get_patient_google_access_token
+from app.services.scheduling_service import frequency_label, get_patient_google_access_token, medicine_to_dict
 from app.config import get_settings
 
 router = APIRouter(prefix="/api", tags=["clinical"])
@@ -221,14 +221,41 @@ async def create_prescription(
     db: AsyncSession = Depends(get_db),
 ):
     doctor = current["user"]
-    rx = Prescription(patient_id=data.patient_id, doctor_id=doctor.id, doctor_notes=data.doctor_notes)
+    patient_result = await db.execute(select(Patient).where(Patient.id == data.patient_id))
+    patient = patient_result.scalar_one_or_none()
+    if not patient:
+        raise HTTPException(404, "Patient not found")
+    if patient.doctor_id != doctor.id:
+        raise HTTPException(403, "This patient is not assigned to you")
+
+    diagnosis = (data.disease or "").strip()
+    if diagnosis:
+        patient.disease = diagnosis
+
+    rx = Prescription(
+        patient_id=data.patient_id,
+        doctor_id=doctor.id,
+        disease=diagnosis,
+        doctor_notes=data.doctor_notes,
+    )
     db.add(rx)
     await db.flush()
     for med in data.medicines:
+        if not med.name.strip():
+            continue
+        med_disease = (med.disease or diagnosis).strip()
         db.add(Medicine(
-            prescription_id=rx.id, name=med.name, dosage=med.dosage,
-            duration_days=med.duration_days, timing=med.timing,
-            start_date=date.today().isoformat(),
+            prescription_id=rx.id,
+            name=med.name.strip(),
+            disease=med_disease,
+            dosage=med.dosage,
+            duration_days=med.duration_days,
+            frequency_pattern=med.frequency_pattern,
+            times_per_day=med.times_per_day,
+            timing=frequency_label(med.frequency_pattern),
+            start_date="",
+            start_time="",
+            dose_times="",
         ))
     await db.flush()
     return {"id": rx.id, "message": "Prescription created"}
@@ -242,8 +269,11 @@ async def get_patient_prescriptions(patient_id: str, current: dict = Depends(get
     )
     rxs = result.scalars().all()
     return [{
-        "id": r.id, "doctor_notes": r.doctor_notes, "created_at": r.created_at.isoformat(),
-        "medicines": [{"name": m.name, "dosage": m.dosage, "timing": m.timing, "duration_days": m.duration_days} for m in r.medicines]
+        "id": r.id,
+        "disease": r.disease,
+        "doctor_notes": r.doctor_notes,
+        "created_at": r.created_at.isoformat(),
+        "medicines": [medicine_to_dict(m) for m in r.medicines],
     } for r in rxs]
 
 
@@ -665,6 +695,11 @@ async def list_patients(current: dict = Depends(get_current_user), db: AsyncSess
         "id": p.id, "patient_code": p.patient_code, "name": p.name, "age": p.age,
         "gender": p.gender, "disease": p.disease, "risk_level": p.risk_level,
         "risk_score": p.risk_score, "visit_date": p.visit_date,
+        "contact": p.contact, "email": p.email,
+        "blood_group": p.blood_group, "weight_kg": p.weight_kg, "height_cm": p.height_cm,
+        "temperature_c": p.temperature_c, "pulse_bpm": p.pulse_bpm,
+        "oxygen_spo2": p.oxygen_spo2, "blood_pressure": p.blood_pressure,
+        "address": p.address,
     } for p in result.scalars()]
 
 

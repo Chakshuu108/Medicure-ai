@@ -55,8 +55,12 @@ export function PatientDashboard() {
       .catch(() => {})
   }, [user])
 
+  const reloadPrescriptions = () => {
+    if (user) api.getPrescriptions(user.id).then(setPrescriptions).catch(() => {})
+  }
+
   useEffect(() => {
-    if (tab === 'care' && user) api.getPrescriptions(user.id).then(setPrescriptions).catch(() => {})
+    if (tab === 'care' && user) reloadPrescriptions()
     if (tab === 'opd') {
       api.getAvailableSlots().then(setSlots).catch(() => {})
       api.getBookings().then(setBookings).catch(() => {})
@@ -114,7 +118,7 @@ export function PatientDashboard() {
       )}
 
       {tab === 'chat' && <ChatPanel />}
-      {tab === 'care' && <CarePlanPanel prescriptions={prescriptions} />}
+      {tab === 'care' && <CarePlanPanel prescriptions={prescriptions} onPrescriptionsChange={reloadPrescriptions} />}
 
       {tab === 'health' && (
         <div className="space-y-6">

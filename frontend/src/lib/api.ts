@@ -114,6 +114,11 @@ export const api = {
   runGuardianCheck: (force = false) =>
     request<GuardianResult>(`/api/patient/guardian-check?force=${force}`, { method: 'POST' }),
   getSchedulePreview: () => request<{ schedule: ScheduleItem[] }>('/api/patient/schedule/preview'),
+  updateMedicineSchedule: (medicineId: string, data: { start_date: string; start_time: string; dose_times?: string[] }) =>
+    request<{ medicine: PrescriptionMedicine }>(`/api/patient/medicines/${medicineId}/schedule`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
   getGoogleAuthUrl: (purpose = 'patient_login') =>
     request<{ url: string }>(`/api/auth/google/url?purpose=${purpose}`),
   exchangeGoogleCode: (code: string) =>
@@ -214,6 +219,16 @@ export interface Patient {
   risk_level: string
   risk_score: number
   visit_date: string
+  contact?: string
+  email?: string
+  blood_group?: string
+  weight_kg?: number | null
+  height_cm?: number | null
+  temperature_c?: number | null
+  pulse_bpm?: number | null
+  oxygen_spo2?: number | null
+  blood_pressure?: string
+  address?: string
 }
 
 export interface Doctor {
@@ -244,11 +259,28 @@ export interface ChatMessage {
   created_at: string
 }
 
+export interface PrescriptionMedicine {
+  id: string
+  name: string
+  disease?: string
+  dosage: string
+  duration_days: number
+  timing: string
+  frequency_pattern: string
+  frequency_label?: string
+  times_per_day: number
+  dose_times: string[]
+  start_date: string
+  start_time: string
+  schedule_ready: boolean
+}
+
 export interface Prescription {
   id: string
+  disease?: string
   doctor_notes: string
   created_at: string
-  medicines: { name: string; dosage: string; timing: string; duration_days: number }[]
+  medicines: PrescriptionMedicine[]
 }
 
 export interface OPDSlot {
@@ -425,6 +457,8 @@ export interface ScheduleItem {
   medicine: string
   dosage: string
   timing: string
+  frequency_pattern?: string
+  medicine_id?: string
 }
 
 export async function streamChat(

@@ -52,29 +52,43 @@ class ReceptionistCreate(BaseModel):
 
 class PatientCreate(BaseModel):
     name: str
-    age: int
+    age: int = Field(ge=0, le=130)
     gender: str
-    contact: str = ""
+    contact: str = Field(min_length=1)
     email: str = ""
     disease: str = ""
     visit_date: str = ""
     doctor_id: str
-    blood_group: str = ""
-    weight_kg: float | None = None
-    blood_pressure: str = ""
+    blood_group: str = Field(min_length=1)
+    weight_kg: float = Field(gt=0, le=500)
+    height_cm: float = Field(gt=0, le=300)
+    temperature_c: float = Field(gt=0, le=50)
+    pulse_bpm: int = Field(gt=0, le=300)
+    oxygen_spo2: float = Field(gt=0, le=100)
+    blood_pressure: str = Field(min_length=3, max_length=20)
+    address: str = ""
 
 
 class MedicineCreate(BaseModel):
     name: str
+    disease: str = ""
     dosage: str
-    duration_days: int = 7
-    timing: str = "morning"
+    duration_days: int = Field(ge=1, le=365)
+    frequency_pattern: str = "daily"
+    times_per_day: int = Field(ge=1, le=6, default=1)
 
 
 class PrescriptionCreate(BaseModel):
     patient_id: str
+    disease: str = ""
     doctor_notes: str = ""
     medicines: list[MedicineCreate]
+
+
+class MedicineScheduleUpdate(BaseModel):
+    start_date: str
+    start_time: str
+    dose_times: list[str] | None = None
 
 
 class ChatRequest(BaseModel):

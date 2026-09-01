@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import admin, auth, clinical, schedule
 from app.config import get_settings, is_groq_configured, reload_settings
-from app.database import Base, engine
+from app.database import Base, apply_schema_patches, engine
 from app.services.proactive_scheduler import start_proactive_scheduler, stop_proactive_scheduler
 
 settings = get_settings()
@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI):
     reload_settings()  # pick up latest backend/.env on every server start
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await apply_schema_patches(conn)
     logger.info("Database tables ready")
     start_proactive_scheduler()
     yield

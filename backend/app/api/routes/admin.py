@@ -131,7 +131,12 @@ async def create_patient(
         visit_date=data.visit_date or date.today().isoformat(),
         blood_group=data.blood_group,
         weight_kg=data.weight_kg,
+        height_cm=data.height_cm,
+        temperature_c=data.temperature_c,
+        pulse_bpm=data.pulse_bpm,
+        oxygen_spo2=data.oxygen_spo2,
         blood_pressure=data.blood_pressure,
+        address=data.address,
     )
     db.add(patient)
     await db.flush()
