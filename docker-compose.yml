@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: medicure-postgres
+    environment:
+      POSTGRES_USER: medicure
+      POSTGRES_PASSWORD: medicure_secret
+      POSTGRES_DB: medicure
+    ports:
+      - "5432:5432"
+    volumes:
+      - medicure_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medicure -d medicure"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  medicure_pg_data:

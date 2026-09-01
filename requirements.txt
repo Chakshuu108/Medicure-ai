@@ -1,0 +1,14 @@
+# ── Web framework ─────────────────────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── HTTP client (Groq API, Google OAuth, Calendar API) ───────────────────────
+requests>=2.31.0
+
+# ── PDF generation ───────────────────────────────────────────────────────────
+reportlab>=4.1.0
+
+# ── Numerical computing ───────────────────────────────────────────────────────
+numpy>=1.26.0
+
+# ── Standard library (no install needed) ─────────────────────────────────────
+# sqlite3, json, hashlib, uuid, smtplib, email, datetime, math, re, io, os, sys, time, traceback, collections
