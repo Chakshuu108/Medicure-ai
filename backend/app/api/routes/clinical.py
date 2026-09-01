@@ -36,8 +36,13 @@ from app.services.mcq_service import (
     get_mcq_trends,
 )
 from app.services.email_service import send_booking_confirmation_email, send_worsening_alert_email
+from app.services.alert_service import (
+    collapse_duplicate_open_alerts,
+    create_clinical_alert,
+    is_doctor_facing,
+    serialize_alert,
+)
 from app.services.reminder_service import process_missed_mcq_reminders
-from app.services.alert_service import create_clinical_alert, is_doctor_facing, serialize_alert
 from app.services.guardian_service import run_guardian
 from app.services.meet_service import (
     _assert_booking_access,
@@ -282,6 +287,11 @@ async def get_patient_prescriptions(patient_id: str, current: dict = Depends(get
 @router.get("/alerts")
 async def get_alerts(current: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     role = current["role"]
+    if role == "doctor":
+        await collapse_duplicate_open_alerts(db, doctor_id=current["user_id"])
+    elif role == "patient":
+        await collapse_duplicate_open_alerts(db, patient_id=current["user_id"])
+
     if role == "patient":
         q = select(Alert).where(Alert.patient_id == current["user_id"])
     elif role == "doctor":
@@ -298,8 +308,10 @@ async def get_alerts(current: dict = Depends(get_current_user), db: AsyncSession
     else:
         q = select(Alert)
 
-    result = await db.execute(q.order_by(Alert.created_at.desc()).limit(50))
-    alerts = [a for a in result.scalars() if is_doctor_facing(a.alert_type)]
+    result = await db.execute(
+        q.where(Alert.resolved == False).order_by(Alert.created_at.desc()).limit(50)  # noqa: E712
+    )
+    alerts = [a for a in result.unique().scalars() if is_doctor_facing(a.alert_type)]
 
     patient_ids = {a.patient_id for a in alerts}
     patients_map: dict[str, Patient] = {}
@@ -647,10 +659,14 @@ async def submit_mcq(data: MCQSubmit, current: dict = Depends(require_roles("pat
             severity=severity,
         )
         if patient.email:
-            await send_worsening_alert_email(patient.name, patient.email, status, total_score)
+            try:
+                asyncio.get_running_loop().create_task(
+                    send_worsening_alert_email(patient.name, patient.email, status, total_score)
+                )
+            except RuntimeError:
+                pass
 
     await db.flush()
-    await run_guardian(db, patient.id, force=True)
     return {
         "message": "MCQ submitted",
         "score": total_score,

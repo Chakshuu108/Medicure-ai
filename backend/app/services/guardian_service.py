@@ -162,7 +162,8 @@ Respond ONLY with valid JSON:
   "patient_message": "warm one sentence for patient",
   "actions_taken_summary": "what you would do"
 }
-Do not repeat already_flagged items. Be specific with dates and scores."""
+Do not repeat already_flagged items. Be specific with dates and scores.
+Return at most 3 findings. Use action "alert_doctor" for at most ONE finding (the most important)."""
 
     upcoming = snapshot.get("upcoming")
     appt_str = f"{upcoming['slot_date']} at {upcoming['start_time']}" if upcoming else "None"
@@ -207,6 +208,7 @@ async def _act(db: AsyncSession, reasoning: dict, snapshot: dict) -> dict:
         except ValueError:
             pass
 
+    doctor_findings = []
     for finding in findings:
         action = finding.get("action", "none")
         severity = finding.get("severity", "low")
@@ -217,34 +219,44 @@ async def _act(db: AsyncSession, reasoning: dict, snapshot: dict) -> dict:
             finding["description"] = (finding.get("description", "") + " Escalated — appointment within 48h.").strip()
 
         if action == "alert_doctor" and severity in ("medium", "high", "severe"):
-            msg = finding.get("alert_message") or finding.get("description") or finding.get("title", "Health concern")
-            msg = (
-                f"Health Guardian noticed: {finding.get('title', 'Pattern')}. "
-                f"{msg}"
-            )
-            already = any(msg[:50] in f for f in snapshot.get("already_flagged", []))
-            if not already:
-                await create_clinical_alert(
-                    db,
-                    patient_id=snapshot["patient_id"],
-                    doctor_id=snapshot.get("doctor_id"),
-                    alert_type="Health Guardian — Pattern Detected",
-                    message=msg,
-                    severity=severity,
-                )
-                action_log.append({
-                    "action": "alert_sent",
-                    "finding": finding.get("title", ""),
-                    "severity": severity,
-                    "timestamp": datetime.now().isoformat(),
-                    "escalated": appt_imminent,
-                })
+            doctor_findings.append(finding)
         elif action in ("flag_in_brief", "monitor"):
             action_log.append({
                 "action": action,
                 "finding": finding.get("title", ""),
                 "severity": severity,
                 "timestamp": datetime.now().isoformat(),
+            })
+
+    if doctor_findings:
+        rank = {"low": 0, "medium": 1, "high": 2, "severe": 3}
+        top = max(doctor_findings, key=lambda f: rank.get(f.get("severity", "medium"), 1))
+        lines = []
+        for finding in doctor_findings[:4]:
+            title = finding.get("title", "Pattern")
+            detail = finding.get("alert_message") or finding.get("description") or ""
+            lines.append(f"• {title}: {detail}".strip())
+        msg = "Health Guardian noticed:\n" + "\n".join(lines)
+        already = any(
+            (top.get("title") or "")[:40] in f
+            for f in snapshot.get("already_flagged", [])
+            if f
+        )
+        if not already:
+            await create_clinical_alert(
+                db,
+                patient_id=snapshot["patient_id"],
+                doctor_id=snapshot.get("doctor_id"),
+                alert_type="Health Guardian — Pattern Detected",
+                message=msg,
+                severity=top.get("severity", "medium"),
+            )
+            action_log.append({
+                "action": "alert_sent",
+                "finding": top.get("title", ""),
+                "severity": top.get("severity", "medium"),
+                "timestamp": datetime.now().isoformat(),
+                "escalated": appt_imminent,
             })
 
     await db.flush()

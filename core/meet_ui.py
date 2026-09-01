@@ -20,9 +20,8 @@ def _jitsi_html(room_name: str, display_name: str, call_end_input_key: str) -> s
     """
     Embeds Jitsi as a plain <iframe> using the direct URL approach.
 
-    Why: Both meet.jit.si and 8x8.vc External API JS now require a registered
-    JaaS account and block anonymous connections with "not allowed to join".
-    The plain iframe URL (meet.jit.si/#config...) still works anonymously.
+    Why: meet.jit.si now requires a logged-in moderator. Use a community
+    Jitsi host that still allows anonymous rooms (no login).
 
     Call-end detection: listens for postMessage events from the Jitsi iframe
     (it emits 'readyToClose' and 'hangup' messages) and also polls every 5s
@@ -35,7 +34,7 @@ def _jitsi_html(room_name: str, display_name: str, call_end_input_key: str) -> s
 
     # Jitsi URL config params — all via fragment hash to skip prejoin and auth
     jitsi_url = (
-        f"https://meet.jit.si/{safe_room}"
+        f"https://meet.ffmuc.net/{safe_room}"
         f"#userInfo.displayName=\"{safe_name}\""
         f"&config.prejoinPageEnabled=false"
         f"&config.startWithAudioMuted=false"

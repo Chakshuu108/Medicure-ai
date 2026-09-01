@@ -34,6 +34,7 @@ export function PatientDashboard() {
   const [mcq, setMcq] = useState<MCQData | null>(null)
   const [mcqAnswers, setMcqAnswers] = useState<Record<number, number>>({})
   const [mcqSubmitted, setMcqSubmitted] = useState(false)
+  const [mcqSubmitting, setMcqSubmitting] = useState(false)
   const [mcqFeedback, setMcqFeedback] = useState<MCQSubmitResult | null>(null)
   const [trends, setTrends] = useState<TrendData | null>(null)
   const [sessionNote, setSessionNote] = useState('')
@@ -94,19 +95,26 @@ export function PatientDashboard() {
   }
 
   const submitMCQ = async () => {
-    if (!mcq) return
+    if (!mcq || mcqSubmitting) return
     const responses: Record<string, number> = {}
     for (const [k, v] of Object.entries(mcqAnswers)) responses[String(k)] = v
-    const result = await api.submitMCQ({
-      responses,
-      total_score: 0,
-      status: 'Stable',
-      side_effects: [],
-      adherence_status: '',
-    }) as MCQSubmitResult
-    setMcqFeedback(result)
-    setMcqSubmitted(true)
-    api.getMCQTrends(14).then(setTrends)
+    setMcqSubmitting(true)
+    try {
+      const result = await api.submitMCQ({
+        responses,
+        total_score: 0,
+        status: 'Stable',
+        side_effects: [],
+        adherence_status: '',
+      }) as MCQSubmitResult
+      setMcqFeedback(result)
+      setMcqSubmitted(true)
+      api.getMCQTrends(14).then(setTrends)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not submit health check')
+    } finally {
+      setMcqSubmitting(false)
+    }
   }
 
   return (
@@ -145,8 +153,8 @@ export function PatientDashboard() {
                     </div>
                   </div>
                 ))}
-                <Button onClick={submitMCQ} disabled={Object.keys(mcqAnswers).length < (mcq?.questions.length || 5)}>
-                  Submit Health Check
+                <Button onClick={submitMCQ} disabled={mcqSubmitting || Object.keys(mcqAnswers).length < (mcq?.questions.length || 5)}>
+                  {mcqSubmitting ? 'Submitting…' : 'Submit Health Check'}
                 </Button>
               </div>
             ) : (

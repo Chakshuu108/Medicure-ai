@@ -11,37 +11,50 @@ interface VideoCallPanelProps {
   onSummarySaved?: () => void
 }
 
-const SPEECH_IFRAME_HTML = `<!DOCTYPE html>
-<html><head><style>body{margin:0;padding:0;overflow:hidden;background:transparent;height:1px;}</style></head>
-<body><script>
-(function(){
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { parent.postMessage({type:'speech-status', supported:false}, '*'); return; }
-  parent.postMessage({type:'speech-status', supported:true}, '*');
-  var t0 = Date.now();
-  var r = new SR();
-  r.continuous = true;
-  r.interimResults = true;
-  r.lang = 'en-IN';
-  r.onresult = function(e) {
-    for (var i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) {
-        var tx = e.results[i][0].transcript.trim();
-        if (tx.length > 1) parent.postMessage({type:'speech-line', text:tx, ts_ms:Date.now()-t0}, '*');
-      }
+/** Public Jitsi servers that still allow anonymous rooms (meet.jit.si no longer does). */
+const JITSI_HOSTS = ['meet.ffmuc.net', 'jitsi.riot.im', 'meet.mayfirst.org']
+
+type SpeechRec = {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onresult: ((ev: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null
+  onerror: ((ev: { error?: string }) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+declare global {
+  interface Window {
+    JitsiMeetExternalAPI?: new (domain: string, options: Record<string, unknown>) => {
+      dispose: () => void
+      executeCommand: (command: string, ...args: unknown[]) => void
+      addListener: (event: string, listener: (...args: unknown[]) => void) => void
     }
-  };
-  r.onerror = function(e) {
-    parent.postMessage({type:'speech-error', error:e.error||'unknown'}, '*');
-    if (e.error !== 'no-speech' && e.error !== 'aborted')
-      setTimeout(function(){ try { r.start(); } catch(x) {} }, 1500);
-  };
-  r.onend = function() {
-    setTimeout(function(){ try { r.start(); } catch(x) {} }, 400);
-  };
-  try { r.start(); } catch(x) { parent.postMessage({type:'speech-status', supported:false}, '*'); }
-})();
-</script></body></html>`
+    webkitSpeechRecognition?: new () => SpeechRec
+    SpeechRecognition?: new () => SpeechRec
+  }
+}
+
+function loadJitsiApi(domain: string): Promise<void> {
+  if (window.JitsiMeetExternalAPI) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(`script[data-jitsi-domain="${domain}"]`)
+    if (existing) {
+      existing.addEventListener('load', () => resolve())
+      existing.addEventListener('error', () => reject(new Error('Jitsi script failed')))
+      return
+    }
+    const script = document.createElement('script')
+    script.src = `https://${domain}/external_api.js`
+    script.async = true
+    script.dataset.jitsiDomain = domain
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error(`Could not load video from ${domain}`))
+    document.head.appendChild(script)
+  })
+}
 
 export function VideoCallPanel({ roomName, displayName, bookingId, onSummarySaved }: VideoCallPanelProps) {
   const [phase, setPhase] = useState<Phase>('idle')
@@ -53,15 +66,97 @@ export function VideoCallPanel({ roomName, displayName, bookingId, onSummarySave
   const [error, setError] = useState('')
   const [speechSupported, setSpeechSupported] = useState(true)
   const [speechStatus, setSpeechStatus] = useState('Waiting for microphone…')
-  const [micReady, setMicReady] = useState(false)
+  const [callStatus, setCallStatus] = useState('Connecting…')
   const callStartRef = useRef(0)
   const inCallRef = useRef(false)
   const localLinesRef = useRef<string[]>([])
-  const micStreamRef = useRef<MediaStream | null>(null)
-  const [jitsiReady, setJitsiReady] = useState(false)
+  const recRef = useRef<SpeechRec | null>(null)
+  const jitsiApiRef = useRef<{ dispose: () => void } | null>(null)
+  const meetNodeRef = useRef<HTMLDivElement | null>(null)
+  const hostIndexRef = useRef(0)
+  const startSpeechRef = useRef<() => void>(() => {})
 
   const safeRoom = roomName.replace(/[^a-zA-Z0-9-]/g, '')
-  const jitsiUrl = `https://meet.jit.si/${safeRoom}#userInfo.displayName="${encodeURIComponent(displayName)}"&config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&interfaceConfig.SHOW_JITSI_WATERMARK=false`
+  const safeName = displayName.replace(/[<>"'\\]/g, '').slice(0, 60) || 'MediCure user'
+
+  const pushLine = useCallback(async (text: string, tsMs: number) => {
+    const cleaned = text.trim()
+    if (cleaned.length < 2) return
+    const line = `${displayName}: ${cleaned}`
+    localLinesRef.current.push(line)
+    setLineCount(localLinesRef.current.length)
+    setLivePreview(prev => (prev ? `${prev}\n${line}` : line))
+    setSpeechStatus('Listening…')
+    try {
+      await api.appendTranscriptLine(bookingId, displayName, cleaned, tsMs)
+    } catch {
+      /* keep local copy even if sync fails */
+    }
+  }, [bookingId, displayName])
+
+  const stopSpeech = useCallback(() => {
+    const rec = recRef.current
+    recRef.current = null
+    if (!rec) return
+    rec.onend = null
+    rec.onerror = null
+    rec.onresult = null
+    try { rec.stop() } catch { /* already stopped */ }
+  }, [])
+
+  const startSpeech = useCallback(() => {
+    stopSpeech()
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SR) {
+      setSpeechSupported(false)
+      setSpeechStatus('This browser cannot capture speech — type notes after the call (Chrome works best)')
+      return
+    }
+    const rec = new SR()
+    rec.continuous = true
+    rec.interimResults = true
+    rec.lang = 'en-IN'
+    rec.onresult = event => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i]
+        const tx = result[0]?.transcript?.trim() || ''
+        if (!tx) continue
+        if (result.isFinal) {
+          void pushLine(tx, Date.now() - callStartRef.current)
+        } else {
+          setSpeechStatus(`Hearing: “${tx.slice(0, 80)}”`)
+        }
+      }
+    }
+    rec.onerror = event => {
+      const err = event.error || 'unknown'
+      if (err === 'not-allowed') {
+        setSpeechSupported(false)
+        setSpeechStatus('Microphone blocked — allow mic access and rejoin, or type notes after the call')
+        return
+      }
+      if (err === 'no-speech' || err === 'aborted') return
+      setSpeechStatus(`Speech paused (${err}) — still listening…`)
+    }
+    rec.onend = () => {
+      if (!inCallRef.current || recRef.current !== rec) return
+      window.setTimeout(() => {
+        if (!inCallRef.current || recRef.current !== rec) return
+        try { rec.start() } catch { /* ignore */ }
+      }, 400)
+    }
+    recRef.current = rec
+    try {
+      rec.start()
+      setSpeechSupported(true)
+      setSpeechStatus('Listening — speak clearly near your microphone')
+    } catch {
+      setSpeechSupported(false)
+      setSpeechStatus('Could not start speech capture — type notes after the call')
+    }
+  }, [pushLine, stopSpeech])
+
+  startSpeechRef.current = startSpeech
 
   useEffect(() => {
     api.getMeetSummary(bookingId)
@@ -74,77 +169,106 @@ export function VideoCallPanel({ roomName, displayName, bookingId, onSummarySave
       .catch(() => {})
   }, [bookingId])
 
-  const pushLine = useCallback(async (text: string, tsMs: number) => {
-    const line = `${displayName}: ${text}`
-    localLinesRef.current.push(line)
-    setLineCount(localLinesRef.current.length)
-    setLivePreview(prev => (prev ? `${prev}\n${line}` : line))
-    setSpeechStatus('Listening…')
-    try {
-      await api.appendTranscriptLine(bookingId, displayName, text, tsMs)
-    } catch {
-      /* keep local copy even if sync fails */
-    }
-  }, [bookingId, displayName])
-
   useEffect(() => {
-    if (phase !== 'call') {
-      setJitsiReady(false)
-      return
-    }
-    const timer = window.setTimeout(() => setJitsiReady(true), 1200)
-    return () => window.clearTimeout(timer)
-  }, [phase])
-
-  useEffect(() => {
-    return () => {
-      micStreamRef.current?.getTracks().forEach(t => t.stop())
-      micStreamRef.current = null
-    }
-  }, [])
+    if (phase !== 'call') return
+    const timer = window.setInterval(() => {
+      api.getTranscript(bookingId)
+        .then(remote => {
+          if (!inCallRef.current) return
+          if (remote.count > localLinesRef.current.length && remote.formatted) {
+            setLivePreview(remote.formatted)
+            setLineCount(remote.count)
+          }
+        })
+        .catch(() => {})
+    }, 4000)
+    return () => window.clearInterval(timer)
+  }, [phase, bookingId])
 
   useEffect(() => {
     if (phase !== 'call') return
-    inCallRef.current = true
+    let cancelled = false
+    const container = meetNodeRef.current
+    if (!container) return
 
-    const onMessage = (event: MessageEvent) => {
-      if (!inCallRef.current || !event.data || typeof event.data !== 'object') return
-      const data = event.data as { type?: string; text?: string; ts_ms?: number; supported?: boolean; error?: string }
-      if (data.type === 'speech-status') {
-        setSpeechSupported(data.supported !== false)
-        if (data.supported === false) setSpeechStatus('Speech capture unavailable — type notes after the call')
-        return
-      }
-      if (data.type === 'speech-error') {
-        if (data.error === 'not-allowed') {
-          setSpeechStatus('Microphone blocked — allow mic access and rejoin, or type notes after the call')
-          setSpeechSupported(false)
-        } else if (data.error !== 'no-speech' && data.error !== 'aborted') {
-          setSpeechStatus(`Speech paused (${data.error}) — still listening…`)
-        }
-        return
-      }
-      if (data.type === 'speech-line' && data.text) {
-        void pushLine(data.text, data.ts_ms ?? Date.now() - callStartRef.current)
+    const startHost = async (index: number) => {
+      const domain = JITSI_HOSTS[index]
+      hostIndexRef.current = index
+      setCallStatus(`Connecting to ${domain}…`)
+      container.replaceChildren()
+      try {
+        window.JitsiMeetExternalAPI = undefined
+        document.querySelectorAll('script[data-jitsi-domain]').forEach(el => el.remove())
+        await loadJitsiApi(domain)
+        if (cancelled || !window.JitsiMeetExternalAPI) throw new Error('Video API missing')
+        const apiInstance = new window.JitsiMeetExternalAPI(domain, {
+          roomName: safeRoom,
+          parentNode: container,
+          width: '100%',
+          height: 420,
+          userInfo: { displayName: safeName },
+          configOverwrite: {
+            prejoinPageEnabled: false,
+            prejoinConfig: { enabled: false },
+            startWithAudioMuted: false,
+            startWithVideoMuted: false,
+            disableDeepLinking: true,
+            enableWelcomePage: false,
+            requireDisplayName: false,
+            enableLobby: false,
+            hideConferenceSubject: true,
+            disableInviteFunctions: true,
+            analytics: { disabled: true },
+            p2p: { enabled: true },
+          },
+          interfaceConfigOverwrite: {
+            SHOW_JITSI_WATERMARK: false,
+            SHOW_BRAND_WATERMARK: false,
+            SHOW_POWERED_BY: false,
+            DISABLE_JOIN_LEAVE_NOTIFICATIONS: true,
+            HIDE_INVITE_MORE_HEADER: true,
+            TOOLBAR_BUTTONS: ['microphone', 'camera', 'hangup', 'chat', 'tileview', 'fullscreen', 'settings'],
+          },
+        })
+        jitsiApiRef.current = apiInstance
+        apiInstance.addListener('videoConferenceJoined', () => {
+          if (cancelled) return
+          setCallStatus('In call — no login needed')
+          startSpeechRef.current()
+        })
+        apiInstance.addListener('participantJoined', () => {
+          if (!cancelled) setCallStatus('In call — another participant joined')
+        })
+        apiInstance.addListener('authenticationRequired', () => {
+          if (cancelled) return
+          apiInstance.dispose()
+          jitsiApiRef.current = null
+          const next = index + 1
+          if (next < JITSI_HOSTS.length) void startHost(next)
+          else setCallStatus('Could not start a login-free room. Try Chrome and rejoin.')
+        })
+        setCallStatus('Waiting for room… speak to capture the transcript')
+      } catch {
+        const next = index + 1
+        if (!cancelled && next < JITSI_HOSTS.length) void startHost(next)
+        else if (!cancelled) setError('Could not start the video room. Check your network and try again.')
       }
     }
 
-    window.addEventListener('message', onMessage)
+    void startHost(0)
     return () => {
-      inCallRef.current = false
-      window.removeEventListener('message', onMessage)
+      cancelled = true
+      try { jitsiApiRef.current?.dispose() } catch { /* ignore */ }
+      jitsiApiRef.current = null
     }
-  }, [phase, pushLine])
+  }, [phase, safeRoom, safeName])
 
   const requestMicAndStart = async () => {
     setError('')
     try {
-      micStreamRef.current?.getTracks().forEach(t => t.stop())
-      micStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true })
-      setMicReady(true)
-      setSpeechStatus('Microphone ready — starting speech capture…')
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach(t => t.stop())
     } catch {
-      setMicReady(false)
       setSpeechSupported(false)
       setSpeechStatus('Microphone permission denied — you can still type notes after the call')
     }
@@ -154,13 +278,16 @@ export function VideoCallPanel({ roomName, displayName, bookingId, onSummarySave
     setLivePreview('')
     setNotes('')
     setSummary(null)
+    inCallRef.current = true
+    startSpeech()
     setPhase('call')
   }
 
   const finishCall = async () => {
     inCallRef.current = false
-    micStreamRef.current?.getTracks().forEach(t => t.stop())
-    micStreamRef.current = null
+    stopSpeech()
+    try { jitsiApiRef.current?.dispose() } catch { /* ignore */ }
+    jitsiApiRef.current = null
     setLoading(true)
     setError('')
     try {
@@ -204,7 +331,7 @@ export function VideoCallPanel({ roomName, displayName, bookingId, onSummarySave
           Video room: <code className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded text-xs">{safeRoom}</code>
         </p>
         <p className="text-xs text-slate-500 mb-3">
-          Doctor and patient must join the same room. Allow microphone when prompted — speech is captured for the AI summary.
+          Doctor and patient join the same room. Allow the microphone — speech is captured for the AI summary. No Jitsi account or login.
         </p>
         <Button onClick={requestMicAndStart}>🎥 Join Video Call</Button>
       </div>
@@ -214,25 +341,12 @@ export function VideoCallPanel({ roomName, displayName, bookingId, onSummarySave
   if (phase === 'call') {
     return (
       <div className="mt-3 space-y-3 relative">
-        <iframe
-          srcDoc={SPEECH_IFRAME_HTML}
-          title="Speech capture"
-          className="w-0 h-0 border-0 opacity-0 pointer-events-none absolute"
-          allow="microphone"
+        <div
+          ref={meetNodeRef}
+          className="w-full h-[420px] rounded-xl border-2 border-primary-500 overflow-hidden bg-slate-950"
         />
-        {jitsiReady ? (
-          <iframe
-            src={jitsiUrl}
-            allow="camera; microphone; display-capture; fullscreen; autoplay"
-            className="w-full h-[420px] rounded-xl border-2 border-primary-500"
-            title="Jitsi video call"
-          />
-        ) : (
-          <div className="w-full h-[420px] rounded-xl border-2 border-primary-500 bg-slate-900 flex items-center justify-center text-white text-sm">
-            Starting speech capture…
-          </div>
-        )}
         <div className="p-3 portal-surface rounded-xl text-xs space-y-2">
+          <p className="text-slate-600 dark:text-slate-300">{callStatus}</p>
           <p className="text-slate-600 dark:text-slate-300">
             🎙 <strong>{lineCount}</strong> sentence(s) captured · {speechStatus}
             {!speechSupported && ' · Type notes after ending the call'}
@@ -242,8 +356,8 @@ export function VideoCallPanel({ roomName, displayName, bookingId, onSummarySave
               {livePreview}
             </div>
           )}
-          {!livePreview && micReady && (
-            <p className="text-slate-500">Speak clearly near your microphone. Both sides&apos; speech is saved to the consultation transcript.</p>
+          {!livePreview && (
+            <p className="text-slate-500">Speak clearly near your microphone. Each side captures their own speech for the summary.</p>
           )}
         </div>
         <Button variant="secondary" onClick={finishCall} loading={loading}>
@@ -262,7 +376,7 @@ export function VideoCallPanel({ roomName, displayName, bookingId, onSummarySave
             <p className="text-xs mb-3 opacity-90">
               {lineCount > 0
                 ? `${lineCount} line(s) captured from the call (doctor + patient). Edit if needed, then generate.`
-                : 'No speech was captured. Type what was discussed in the consultation below.'}
+                : 'No speech was captured automatically. Type what was discussed, then generate the summary.'}
             </p>
             <textarea
               value={notes}

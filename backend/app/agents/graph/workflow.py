@@ -528,6 +528,7 @@ Respond JSON: {{"findings": [{{"title": "", "description": "", "severity": "low|
                 "severity": finding.get("severity", "medium"),
             })
             await emitter.emit_tool_called("guardian_agent", "create_alert")
+            break
 
     reply = data.get("patient_message") or data.get("overall_assessment", "Health Guardian review complete.")
     await emitter.emit_completed("guardian_agent")
