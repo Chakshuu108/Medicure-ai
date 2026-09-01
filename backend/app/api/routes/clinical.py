@@ -616,7 +616,7 @@ async def submit_mcq(data: MCQSubmit, current: dict = Depends(require_roles("pat
     existing = await db.execute(
         select(MCQResponse).where(MCQResponse.patient_id == patient.id, MCQResponse.date == today)
     )
-    if existing.scalar_one_or_none():
+    if existing.scalars().first():
         raise HTTPException(400, "You already completed today's health check.")
 
     mcq_result = await db.execute(

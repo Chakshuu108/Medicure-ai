@@ -101,7 +101,7 @@ def format_transcript_lines(lines: list[dict]) -> str:
 async def clear_transcript_lines(db: AsyncSession, booking_id: str) -> None:
     result = await db.execute(select(MeetTranscriptLine).where(MeetTranscriptLine.booking_id == booking_id))
     for row in result.scalars().all():
-        db.delete(row)
+        await db.delete(row)
     await db.flush()
 
 
