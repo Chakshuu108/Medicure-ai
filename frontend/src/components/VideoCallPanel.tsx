@@ -197,11 +197,11 @@ export function VideoCallPanel({ roomName, displayName, bookingId, onSummarySave
       setCallStatus(`Connecting to ${domain}…`)
       container.replaceChildren()
       try {
-        window.JitsiMeetExternalAPI = undefined
         document.querySelectorAll('script[data-jitsi-domain]').forEach(el => el.remove())
         await loadJitsiApi(domain)
-        if (cancelled || !window.JitsiMeetExternalAPI) throw new Error('Video API missing')
-        const apiInstance = new window.JitsiMeetExternalAPI(domain, {
+        const JitsiCtor = window.JitsiMeetExternalAPI
+        if (cancelled || !JitsiCtor) throw new Error('Video API missing')
+        const apiInstance = new JitsiCtor(domain, {
           roomName: safeRoom,
           parentNode: container,
           width: '100%',
