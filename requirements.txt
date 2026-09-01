@@ -12,3 +12,12 @@ numpy>=1.26.0
 
 # ── Standard library (no install needed) ─────────────────────────────────────
 # sqlite3, json, hashlib, uuid, smtplib, email, datetime, math, re, io, os, sys, time, traceback, collections
+
+sqlalchemy
+
+asyncpg
+
+psycopg2-binary
+fastapi
+uvicorn
+
