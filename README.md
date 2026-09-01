@@ -50,6 +50,23 @@ npm run dev
 
 Open **http://localhost:5173**
 
+## Deploy (Render / split frontend + backend)
+
+The SPA calls `/api/...`. Locally Vite **proxies** that to port 8000. A static site has no proxy, so you must bake in the backend URL at **build** time.
+
+**Backend (Web Service)**
+- Root directory: `backend`
+- Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Env: `DATABASE_URL`, `SECRET_KEY`, `GROQ_API_KEY`, `FRONTEND_URL` (your static site origin, e.g. `https://medicure-frontend.onrender.com`), `GOOGLE_REDIRECT_URI` (`https://your-frontend.onrender.com/auth/google/callback`)
+
+**Frontend (Static Site)**
+- Root directory: `frontend`
+- Build: `npm install && npm run build`
+- Publish directory: `dist`
+- Env (needed **before** the build): `VITE_API_URL=https://your-backend.onrender.com` (no trailing slash)
+
+Then add that same frontend origin in Google Cloud Console as an authorized JavaScript origin and redirect URI. After changing `VITE_API_URL`, trigger a **new frontend deploy** — Vite inlines the value at build time.
+
 ## Demo Credentials
 
 | Role | Login | Password |

@@ -1,5 +1,32 @@
 import { getToken } from './utils'
 
+/** Backend origin. Empty in local Vite (dev proxy). Required at build time on Render/Vercel. */
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+
+function apiUrl(path: string): string {
+  return `${API_BASE}${path}`
+}
+
+function parseErrorMessage(statusText: string, body: string): string {
+  if (!body) {
+    return (
+      statusText ||
+      'No response from the API. Set VITE_API_URL to your backend URL and rebuild the frontend.'
+    )
+  }
+  try {
+    const err = JSON.parse(body) as { detail?: unknown }
+    const detail = err.detail
+    if (Array.isArray(detail)) {
+      return detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join(', ')
+    }
+    if (typeof detail === 'string') return detail
+  } catch {
+    /* HTML / empty body from a static host */
+  }
+  return statusText || 'Request failed'
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
   const headers: Record<string, string> = {
@@ -8,22 +35,39 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const res = await fetch(`${path}`, { ...options, headers })
+  const res = await fetch(apiUrl(path), { ...options, headers })
+  const body = await res.text()
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    const detail = err.detail
-    const message = Array.isArray(detail)
-      ? detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join(', ')
-      : (typeof detail === 'string' ? detail : res.statusText || 'Request failed')
-    throw new Error(message)
+    throw new Error(parseErrorMessage(res.statusText, body))
   }
-  return res.json()
+  if (!body) {
+    throw new Error(
+      'Empty response from the API. Set VITE_API_URL to your backend URL (no trailing slash) and rebuild.',
+    )
+  }
+  try {
+    return JSON.parse(body) as T
+  } catch {
+    throw new Error(
+      'The frontend is not talking to the API (got a non-JSON response). Set VITE_API_URL to your backend URL and rebuild the static site.',
+    )
+  }
 }
 
 export const api = {
   getDemoCredentials: () => request<DemoCredential[]>('/api/demo-credentials'),
   loginAdmin: (email: string, password: string) =>
     request<AuthResponse>('/api/auth/admin/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  registerHospital: (data: {
+    name: string
+    email: string
+    password: string
+    address?: string
+    phone?: string
+    city?: string
+    website?: string
+    pincode?: string
+  }) => request<AuthResponse>('/api/auth/admin/register', { method: 'POST', body: JSON.stringify(data) }),
   loginDoctor: (email: string, password: string) =>
     request<AuthResponse>('/api/auth/doctor/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   loginReceptionist: (email: string, password: string) =>
@@ -113,6 +157,9 @@ export const api = {
     request('/api/admin/doctors', { method: 'POST', body: JSON.stringify(data) }),
   createReceptionist: (data: unknown) =>
     request('/api/admin/receptionists', { method: 'POST', body: JSON.stringify(data) }),
+  getHospital: () => request<HospitalProfile>('/api/admin/hospital'),
+  getHospitalDoctors: () => request<HospitalDoctor[]>('/api/admin/doctors'),
+  getHospitalReceptionists: () => request<HospitalReceptionist[]>('/api/admin/receptionists'),
 }
 
 export interface AuthResponse {
@@ -122,6 +169,32 @@ export interface AuthResponse {
   name: string
   hospital_id?: string
   extra?: Record<string, unknown>
+}
+
+export interface HospitalProfile {
+  id: string
+  hospital_code: string
+  name: string
+  email: string
+  address: string
+  phone: string
+  city: string
+  website: string
+  pincode: string
+}
+
+export interface HospitalDoctor {
+  id: string
+  name: string
+  email: string
+  specialization: string
+  doctor_code: string
+}
+
+export interface HospitalReceptionist {
+  id: string
+  name: string
+  email: string
 }
 
 export interface DemoCredential {
@@ -359,7 +432,7 @@ export async function streamChat(
   onEvent: (event: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
   const token = getToken()
-  const res = await fetch('/api/patient/chat', {
+  const res = await fetch(apiUrl('/api/patient/chat'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

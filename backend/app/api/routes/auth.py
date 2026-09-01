@@ -61,7 +61,7 @@ settings = get_settings()
 async def get_demo_credentials():
     return [
         DemoCredentials(role="admin", email_or_code="admin@medicure.demo", password="demo123",
-                        description="Hospital admin — manage doctors & receptionists"),
+                        description="Demo hospital only — real hospitals should Register hospital first"),
         DemoCredentials(role="doctor", email_or_code="doctor@medicure.demo", password="demo123",
                         description="Doctor — prescriptions, OPD, alerts, AI assistant"),
         DemoCredentials(role="receptionist", email_or_code="reception@medicure.demo", password="demo123",
@@ -84,12 +84,20 @@ async def register_admin(data: HospitalRegister, db: AsyncSession = Depends(get_
         address=data.address,
         phone=data.phone,
         city=data.city,
+        website=data.website,
+        pincode=data.pincode,
     )
     db.add(hospital)
     await db.flush()
     token = create_access_token({"sub": hospital.id, "role": "admin"})
-    return TokenResponse(access_token=token, role="admin", user_id=hospital.id, name=hospital.name,
-                         hospital_id=hospital.id)
+    return TokenResponse(
+        access_token=token,
+        role="admin",
+        user_id=hospital.id,
+        name=hospital.name,
+        hospital_id=hospital.id,
+        extra={"hospital_code": hospital.hospital_code, "email": hospital.email},
+    )
 
 
 @router.post("/auth/admin/login", response_model=TokenResponse)
@@ -99,8 +107,14 @@ async def login_admin(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not hospital or not verify_password(data.password, hospital.password_hash):
         raise HTTPException(401, "Invalid credentials")
     token = create_access_token({"sub": hospital.id, "role": "admin"})
-    return TokenResponse(access_token=token, role="admin", user_id=hospital.id, name=hospital.name,
-                         hospital_id=hospital.id)
+    return TokenResponse(
+        access_token=token,
+        role="admin",
+        user_id=hospital.id,
+        name=hospital.name,
+        hospital_id=hospital.id,
+        extra={"hospital_code": hospital.hospital_code, "email": hospital.email},
+    )
 
 
 @router.post("/auth/doctor/login", response_model=TokenResponse)
@@ -201,4 +215,8 @@ async def get_me(current: dict = Depends(get_current_user)):
         "email": getattr(user, "email", None),
         "hospital_id": current.get("hospital_id"),
         "patient_code": getattr(user, "patient_code", None),
+        "hospital_code": getattr(user, "hospital_code", None),
+        "address": getattr(user, "address", None),
+        "phone": getattr(user, "phone", None),
+        "city": getattr(user, "city", None),
     }

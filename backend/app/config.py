@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
     frontend_url: str = "http://localhost:5173"
+    # Extra CORS origins, comma-separated (e.g. https://medicure.onrender.com)
+    cors_origins: str = ""
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = ""

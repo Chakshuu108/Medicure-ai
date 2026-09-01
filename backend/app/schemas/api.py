@@ -32,6 +32,8 @@ class HospitalRegister(BaseModel):
     address: str = ""
     phone: str = ""
     city: str = ""
+    website: str = ""
+    pincode: str = ""
 
 
 class DoctorCreate(BaseModel):

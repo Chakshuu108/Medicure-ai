@@ -6,11 +6,62 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, require_roles
 from app.database import get_db
-from app.models import Doctor, Patient, Receptionist
+from app.models import Doctor, Hospital, Patient, Receptionist
 from app.services.proactive_monitor_service import get_last_proactive_scan, run_proactive_scan_all
 from app.schemas.api import DoctorCreate, PatientCreate, ReceptionistCreate
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+@router.get("/hospital")
+async def get_hospital(
+    current: dict = Depends(require_roles("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Hospital).where(Hospital.id == current["hospital_id"]))
+    hospital = result.scalar_one_or_none()
+    if not hospital:
+        raise HTTPException(404, "Hospital not found")
+    return {
+        "id": hospital.id,
+        "hospital_code": hospital.hospital_code,
+        "name": hospital.name,
+        "email": hospital.email,
+        "address": hospital.address,
+        "phone": hospital.phone,
+        "city": hospital.city,
+        "website": hospital.website,
+        "pincode": hospital.pincode,
+    }
+
+
+@router.get("/doctors")
+async def list_hospital_doctors(
+    current: dict = Depends(require_roles("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Doctor).where(Doctor.hospital_id == current["hospital_id"]).order_by(Doctor.name))
+    return [
+        {
+            "id": d.id,
+            "name": d.name,
+            "email": d.email,
+            "specialization": d.specialization,
+            "doctor_code": d.doctor_code,
+        }
+        for d in result.scalars()
+    ]
+
+
+@router.get("/receptionists")
+async def list_hospital_receptionists(
+    current: dict = Depends(require_roles("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Receptionist).where(Receptionist.hospital_id == current["hospital_id"]).order_by(Receptionist.name)
+    )
+    return [{"id": r.id, "name": r.name, "email": r.email} for r in result.scalars()]
 
 
 @router.post("/doctors")

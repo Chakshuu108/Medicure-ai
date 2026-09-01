@@ -68,7 +68,9 @@ async def get_current_user(
 
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    return {"role": role, "user": user, "user_id": user_id, "hospital_id": getattr(user, "hospital_id", None)}
+    # Admin *is* the hospital record — it has no hospital_id column.
+    hospital_id = user.id if role == "admin" else getattr(user, "hospital_id", None)
+    return {"role": role, "user": user, "user_id": user_id, "hospital_id": hospital_id}
 
 
 def require_roles(*roles: str):

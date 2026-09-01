@@ -119,8 +119,9 @@ export const DoctorTabs = [
 ]
 
 export const AdminTabs = [
+  { id: 'hospital', label: 'Hospital', icon: <Heart className="w-4 h-4" /> },
   { id: 'doctors', label: 'Doctors', icon: <Stethoscope className="w-4 h-4" /> },
-  { id: 'staff', label: 'Staff', icon: <Users className="w-4 h-4" /> },
+  { id: 'staff', label: 'Receptionists', icon: <Users className="w-4 h-4" /> },
 ]
 
 export const ReceptionTabs = [

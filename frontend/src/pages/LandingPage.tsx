@@ -69,8 +69,8 @@ const stats = [
 ]
 
 const steps = [
-  { step: '01', title: 'Sign in', desc: 'Choose your role — patient, doctor, admin, or reception.' },
-  { step: '02', title: 'Connect', desc: 'Book OPD, chat with AI, or manage clinical workflows.' },
+  { step: '01', title: 'Register hospital', desc: 'Hospital admin creates the hospital, then adds doctors and receptionists.' },
+  { step: '02', title: 'Connect', desc: 'Staff sign in with the accounts the admin created. Patients use their Patient ID.' },
   { step: '03', title: 'Consult', desc: 'Join video calls; summaries save automatically for both sides.' },
 ]
 
@@ -97,6 +97,18 @@ export function LandingPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [adminMode, setAdminMode] = useState<'register' | 'login'>('register')
+  const [hospitalForm, setHospitalForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    confirm: '',
+    address: '',
+    phone: '',
+    city: '',
+    website: '',
+    pincode: '',
+  })
 
   useEffect(() => {
     if (user) navigate(`/${user.role}`)
@@ -105,6 +117,8 @@ export function LandingPage() {
 
   const selectDemo = (demo: DemoCredential) => {
     setSelectedRole(demo.role)
+    setError('')
+    if (demo.role === 'admin') setAdminMode('login')
     if (demo.role !== 'patient') {
       setEmail(demo.email_or_code)
       setPassword(demo.password || '')
@@ -129,6 +143,37 @@ export function LandingPage() {
     }
   }
 
+  const registerHospital = async () => {
+    if (!hospitalForm.name.trim() || !hospitalForm.email.trim() || !hospitalForm.password) {
+      setError('Hospital name, admin email, and password are required.')
+      return
+    }
+    if (hospitalForm.password !== hospitalForm.confirm) {
+      setError('Passwords do not match.')
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      const response = await api.registerHospital({
+        name: hospitalForm.name.trim(),
+        email: hospitalForm.email.trim(),
+        password: hospitalForm.password,
+        address: hospitalForm.address.trim(),
+        phone: hospitalForm.phone.trim(),
+        city: hospitalForm.city.trim(),
+        website: hospitalForm.website.trim(),
+        pincode: hospitalForm.pincode.trim(),
+      })
+      authLogin(response)
+      navigate('/admin')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Hospital registration failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const scrollToPortals = () => {
     document.getElementById('portals')?.scrollIntoView({ behavior: 'smooth' })
   }
@@ -136,7 +181,7 @@ export function LandingPage() {
   const portalMeta: Record<string, { desc: string }> = {
     patient: { desc: 'AI chat, video OPD, health checks' },
     doctor: { desc: 'Prescriptions, alerts, consultations' },
-    admin: { desc: 'Hospital & staff management' },
+    admin: { desc: 'Register hospital, then add staff' },
     receptionist: { desc: 'Patient registration' },
   }
 
@@ -200,7 +245,11 @@ export function LandingPage() {
               <button
                 key={role}
                 type="button"
-                onClick={() => setSelectedRole(role)}
+                onClick={() => {
+                  setSelectedRole(role)
+                  setError('')
+                  if (role === 'admin') setAdminMode('register')
+                }}
                 className={`text-left p-4 sm:p-5 rounded-2xl border transition-all duration-200
                   ${selectedRole === role
                     ? 'bg-violet-600/20 border-violet-500/60 ring-2 ring-violet-400/40 shadow-lg shadow-violet-600/20'
@@ -210,7 +259,7 @@ export function LandingPage() {
                   {roleIcons[role]}
                 </div>
                 <p className="font-semibold capitalize text-white text-sm sm:text-base" style={{ fontFamily: 'var(--font-display)' }}>
-                  {role}
+                  {role === 'admin' ? 'Hospital admin' : role}
                 </p>
                 <p className="text-xs text-slate-500 mt-1 leading-snug">{portalMeta[role].desc}</p>
               </button>
@@ -221,10 +270,19 @@ export function LandingPage() {
           <div className="max-w-2xl mx-auto bg-white/[0.04] backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/20">
             <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2" style={{ fontFamily: 'var(--font-display)' }}>
               <LogIn className="w-5 h-5 text-violet-400" />
-              Sign in as <span className="capitalize text-violet-300">{selectedRole}</span>
+              {selectedRole === 'admin'
+                ? (adminMode === 'register' ? 'Register your hospital' : 'Hospital admin sign in')
+                : <>Sign in as <span className="capitalize text-violet-300">{selectedRole}</span></>}
             </h3>
-            <p className="text-slate-500 text-sm mb-5">Quick demo credentials</p>
+            <p className="text-slate-500 text-sm mb-5">
+              {selectedRole === 'admin'
+                ? 'Register the hospital first. Then add doctors and receptionists inside the admin portal.'
+                : selectedRole === 'doctor' || selectedRole === 'receptionist'
+                  ? 'Use the account your hospital admin created for you.'
+                  : 'Quick demo credentials'}
+            </p>
 
+            {selectedRole !== 'admin' && (
             <div className="space-y-2 mb-5">
               {demos.map(demo => (
                 <button
@@ -244,6 +302,7 @@ export function LandingPage() {
                 </button>
               ))}
             </div>
+            )}
 
             {selectedRole === 'patient' ? (
               <div className="space-y-4 pt-2 border-t border-white/8">
@@ -280,6 +339,102 @@ export function LandingPage() {
                   )}
                   Continue with Google
                 </button>
+              </div>
+            ) : selectedRole === 'admin' ? (
+              <div className="space-y-3 pt-2 border-t border-white/8">
+                <div className="flex rounded-xl bg-white/5 p-1 border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => { setAdminMode('register'); setError('') }}
+                    className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${adminMode === 'register' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Register hospital
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAdminMode('login'); setError('') }}
+                    className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${adminMode === 'login' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Sign in
+                  </button>
+                </div>
+                {adminMode === 'register' ? (
+                  <>
+                    <input
+                      value={hospitalForm.name}
+                      onChange={e => setHospitalForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="Hospital name *"
+                      className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                    />
+                    <input
+                      value={hospitalForm.email}
+                      onChange={e => setHospitalForm(f => ({ ...f, email: e.target.value }))}
+                      placeholder="Admin email *"
+                      className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                    />
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <input
+                        type="password"
+                        value={hospitalForm.password}
+                        onChange={e => setHospitalForm(f => ({ ...f, password: e.target.value }))}
+                        placeholder="Password *"
+                        className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                      />
+                      <input
+                        type="password"
+                        value={hospitalForm.confirm}
+                        onChange={e => setHospitalForm(f => ({ ...f, confirm: e.target.value }))}
+                        placeholder="Confirm password *"
+                        className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                      />
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <input
+                        value={hospitalForm.city}
+                        onChange={e => setHospitalForm(f => ({ ...f, city: e.target.value }))}
+                        placeholder="City"
+                        className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                      />
+                      <input
+                        value={hospitalForm.phone}
+                        onChange={e => setHospitalForm(f => ({ ...f, phone: e.target.value }))}
+                        placeholder="Phone"
+                        className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                      />
+                    </div>
+                    <input
+                      value={hospitalForm.address}
+                      onChange={e => setHospitalForm(f => ({ ...f, address: e.target.value }))}
+                      placeholder="Address"
+                      className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                    />
+                    {error && <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
+                    <Button onClick={registerHospital} loading={loading} className="w-full !py-3.5 shadow-lg shadow-violet-600/25" size="lg">
+                      Register hospital
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      placeholder="Hospital admin email"
+                      className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                    />
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Password"
+                      onKeyDown={e => e.key === 'Enter' && login()}
+                      className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                    />
+                    {error && <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>}
+                    <Button onClick={login} loading={loading} className="w-full !py-3.5 shadow-lg shadow-violet-600/25" size="lg">
+                      Sign in to hospital
+                    </Button>
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-3 pt-2 border-t border-white/8">

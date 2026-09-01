@@ -14,6 +14,16 @@ logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
 
 
+def _cors_allow_origins() -> list[str]:
+    origins = {"http://localhost:5173", "http://127.0.0.1:5173"}
+    for part in (settings.frontend_url, settings.cors_origins):
+        for origin in part.split(","):
+            o = origin.strip().rstrip("/")
+            if o:
+                origins.add(o)
+    return [o for o in origins if o]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     reload_settings()  # pick up latest backend/.env on every server start
@@ -35,7 +45,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
