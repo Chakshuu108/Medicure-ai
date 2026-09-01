@@ -1,10 +1,40 @@
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _ENV_FILE = _BACKEND_DIR / ".env"
+
+# asyncpg rejects sslmode / channel_binding in the URL query string
+_ASYNC_STRIP_QUERY = frozenset({"sslmode", "channel_binding"})
+
+
+def _clean_db_url(url: str, *, async_driver: bool) -> str:
+    """Normalize Neon/Render connection strings for SQLAlchemy."""
+    u = (url or "").strip().strip('"').strip("'")
+    if not u:
+        raise ValueError("DATABASE_URL is empty — set it in Render Environment variables")
+    if u.startswith("postgres://"):
+        u = "postgresql://" + u[len("postgres://") :]
+    if async_driver:
+        if u.startswith("postgresql://") and "+asyncpg" not in u:
+            u = u.replace("postgresql://", "postgresql+asyncpg://", 1)
+        parsed = urlparse(u)
+        if parsed.query:
+            kept = [(k, v) for k, v in parse_qsl(parsed.query) if k.lower() not in _ASYNC_STRIP_QUERY]
+            u = urlunparse(parsed._replace(query=urlencode(kept)))
+    else:
+        u = u.replace("postgresql+asyncpg://", "postgresql://", 1)
+    return u
+
+
+def database_ssl_required(url: str) -> bool:
+    """Neon and other cloud Postgres hosts need SSL for asyncpg."""
+    host = (urlparse(url).hostname or "").lower()
+    return host.endswith(".neon.tech") or "sslmode=require" in url.lower()
 
 
 class Settings(BaseSettings):
@@ -16,6 +46,16 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://medicure:medicure_secret@localhost:5432/medicure"
     database_url_sync: str = "postgresql://medicure:medicure_secret@localhost:5432/medicure"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_async_url(cls, v: str) -> str:
+        return _clean_db_url(v, async_driver=True)
+
+    @field_validator("database_url_sync", mode="before")
+    @classmethod
+    def normalize_sync_url(cls, v: str) -> str:
+        return _clean_db_url(v, async_driver=False)
     secret_key: str = "dev-secret-change-in-production"
     access_token_expire_minutes: int = 1440
     algorithm: str = "HS256"
